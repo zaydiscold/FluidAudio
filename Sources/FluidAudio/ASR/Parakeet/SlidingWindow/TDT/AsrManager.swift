@@ -80,11 +80,15 @@ public actor AsrManager {
     internal var vocabulary: [Int: String] = [:]
     /// Sentence-final punctuation ids resolved from `vocabulary` (issue #905).
     internal var punctuationTokenIds: Set<Int> = Set(ASRConstants.punctuationTokens)
+    /// Spelled-letter tokens resolved from `vocabulary`, only when
+    /// `TdtConfig.spelledLetterRepeatMargin` is set.
+    internal var spelledLetterTokens: TdtSpelledLetterRepeat.Tokens?
     #if DEBUG
     // Test-only setter
     internal func setVocabularyForTesting(_ vocab: [Int: String]) {
         vocabulary = vocab
         punctuationTokenIds = ASRConstants.punctuationTokenIds(in: vocab)
+        spelledLetterTokens = Self.spelledLetterTokens(config: config, vocabulary: vocab)
     }
     #endif
 
@@ -106,6 +110,7 @@ public actor AsrManager {
             self.jointModel = models.joint
             self.vocabulary = models.vocabulary
             self.punctuationTokenIds = ASRConstants.punctuationTokenIds(in: models.vocabulary)
+            self.spelledLetterTokens = Self.spelledLetterTokens(config: config, vocabulary: models.vocabulary)
         }
 
         // Pre-warm caches if possible
@@ -198,6 +203,7 @@ public actor AsrManager {
         self.jointModel = models.joint
         self.vocabulary = models.vocabulary
         self.punctuationTokenIds = ASRConstants.punctuationTokenIds(in: models.vocabulary)
+        self.spelledLetterTokens = Self.spelledLetterTokens(config: config, vocabulary: models.vocabulary)
 
         logger.info("AsrManager loaded successfully with provided models")
     }
@@ -281,6 +287,14 @@ public actor AsrManager {
         logger.info("AsrManager resources cleaned up")
     }
 
+    /// Resolves the spelled-letter tokens once per vocabulary, when the repeat rule is on.
+    internal static func spelledLetterTokens(
+        config: ASRConfig, vocabulary: [Int: String]
+    ) -> TdtSpelledLetterRepeat.Tokens? {
+        guard config.tdtConfig.spelledLetterRepeatMargin != nil, !vocabulary.isEmpty else { return nil }
+        return TdtSpelledLetterRepeat.Tokens(vocabulary: vocabulary)
+    }
+
     internal func tdtDecodeWithTimings(
         encoderOutput: MLMultiArray,
         encoderSequenceLength: Int,
@@ -311,7 +325,8 @@ public actor AsrManager {
                 blankId: models.version.blankId,
                 boundarySearchFrames: config.tdtConfig.boundarySearchFrames,
                 maxTokensPerChunk: config.tdtConfig.maxTokensPerChunk,
-                consecutiveBlankLimit: config.tdtConfig.consecutiveBlankLimit
+                consecutiveBlankLimit: config.tdtConfig.consecutiveBlankLimit,
+                spelledLetterRepeatMargin: config.tdtConfig.spelledLetterRepeatMargin
             )
 
             workingConfig = workingConfig.replacing(tdtConfig: adaptedTdtConfig)
@@ -366,6 +381,7 @@ public actor AsrManager {
                 language: language,
                 vocabulary: vocabulary,
                 punctuationTokenIds: punctuationTokenIds,
+                spelledLetterTokens: spelledLetterTokens,
                 emitTokensAfterGlobalFrame: emitTokensAfterGlobalFrame,
                 initialTimeIndexOverride: initialTimeIndexOverride
             )

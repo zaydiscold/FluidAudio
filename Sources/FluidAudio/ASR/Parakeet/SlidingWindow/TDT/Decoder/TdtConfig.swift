@@ -6,6 +6,13 @@ public struct TdtConfig: Sendable {
     public let boundarySearchFrames: Int
     public let maxTokensPerChunk: Int
     public let consecutiveBlankLimit: Int
+    /// Experimental. Writes a spelled-out letter a second time ("D A A N" rather than "DAN") when,
+    /// right after it, the joint scores the same letter within this many logits of blank. `nil`
+    /// (the default) turns it off. Needs a v3-style joint with `top_k_ids` / `top_k_logits`
+    /// outputs. At 3 it cut dropped doubles in synthetic spelled clips from 4.8% to 2.2%, but in
+    /// real recordings it also wrote letters people said once, mostly at the end of a spelled
+    /// word. See `TdtSpelledLetterRepeat`.
+    public let spelledLetterRepeatMargin: Float?
 
     public static let `default` = TdtConfig()
 
@@ -22,7 +29,8 @@ public struct TdtConfig: Sendable {
         // Increased to 150 for 11.2s center chunks (~40 words * 2-3 tokens/word + buffer)
         maxTokensPerChunk: Int = 150,
         // Number of consecutive blanks to trigger early termination in last chunk
-        consecutiveBlankLimit: Int = 5
+        consecutiveBlankLimit: Int = 5,
+        spelledLetterRepeatMargin: Float? = nil
     ) {
         self.includeTokenDuration = includeTokenDuration
         self.maxSymbolsPerStep = maxSymbolsPerStep
@@ -31,5 +39,6 @@ public struct TdtConfig: Sendable {
         self.boundarySearchFrames = boundarySearchFrames
         self.maxTokensPerChunk = maxTokensPerChunk
         self.consecutiveBlankLimit = consecutiveBlankLimit
+        self.spelledLetterRepeatMargin = spelledLetterRepeatMargin
     }
 }

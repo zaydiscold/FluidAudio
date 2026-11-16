@@ -114,6 +114,7 @@ internal struct TdtDecoderV3: Sendable {
         language: Language? = nil,
         vocabulary: [Int: String]? = nil,
         punctuationTokenIds: Set<Int>? = nil,
+        spelledLetterTokens: TdtSpelledLetterRepeat.Tokens? = nil,
         emitTokensAfterGlobalFrame: Int? = nil,
         initialTimeIndexOverride: Int? = nil
     ) async throws -> TdtHypothesis {
@@ -129,6 +130,12 @@ internal struct TdtDecoderV3: Sendable {
         // didn't provide a language (default path), so v3 joint runs don't pay
         // for K-length array allocations they'll never use.
         let needsTopK = language != nil
+        // The spelled-letter repeat rule asks for top-K only in the few frames it watches.
+        var spelledRepeat: TdtSpelledLetterRepeat? = nil
+        if let margin = config.tdtConfig.spelledLetterRepeatMargin, let spelledLetterTokens {
+            spelledRepeat = TdtSpelledLetterRepeat(
+                margin: margin, blankId: config.tdtConfig.blankId, tokens: spelledLetterTokens)
+        }
 
         // Build a stride-aware view so we can access encoder frames without extra copies
         let encoderFrames = try EncoderFrameView(
@@ -276,7 +283,7 @@ internal struct TdtDecoderV3: Sendable {
                 tokenProbBacking: tokenProbBacking,
                 durationBacking: durationBacking,
                 topKBackings: topKBackings,
-                needsTopK: needsTopK
+                needsTopK: needsTopK || spelledRepeat?.isWatching(frame: timeIndices) == true
             )
 
             // Predict token (what to emit) and duration (how many frames to skip)
@@ -321,6 +328,11 @@ internal struct TdtDecoderV3: Sendable {
             if blankMask && duration == 0 {
                 duration = 1
             }
+
+            spelledRepeat?.apply(
+                label: &label, duration: &duration, frame: currentTimeIndex,
+                topKIds: decision.topKIds, topKLogits: decision.topKLogits)
+            blankMask = (label == blankId)
 
             // Advance through audio frames based on predicted duration
             timeIndicesCurrentLabels = timeIndices  // Remember where this token was emitted
@@ -367,7 +379,7 @@ internal struct TdtDecoderV3: Sendable {
                     tokenProbBacking: tokenProbBacking,
                     durationBacking: durationBacking,
                     topKBackings: topKBackings,
-                    needsTopK: needsTopK
+                    needsTopK: needsTopK || spelledRepeat?.isWatching(frame: timeIndices) == true
                 )
 
                 label = innerDecision.token
@@ -400,6 +412,10 @@ internal struct TdtDecoderV3: Sendable {
                 if blankMask && duration == 0 {
                     duration = 1
                 }
+                spelledRepeat?.apply(
+                    label: &label, duration: &duration, frame: timeIndices,
+                    topKIds: innerDecision.topKIds, topKLogits: innerDecision.topKLogits)
+                blankMask = (label == blankId)
 
                 // Advance by duration regardless of blank/non-blank
                 // This is the ORIGINAL and CORRECT logic
@@ -434,6 +450,7 @@ internal struct TdtDecoderV3: Sendable {
                     hypothesis.suppressedTimestamps.append(emissionTimestamp)
                 }
                 hypothesis.lastToken = label  // Remember for next iteration
+                spelledRepeat?.didEmit(label, atFrame: timeIndicesCurrentLabels)
 
                 // CRITICAL: Update decoder LSTM with the new token
                 // This updates the language model context for better predictions
